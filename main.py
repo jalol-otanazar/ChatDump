@@ -1,54 +1,37 @@
-import asyncio
 import json
 import re
+from bs4 import BeautifulSoup
+from curl_cffi import requests as cffi_requests
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from pydantic import BaseModel
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
-from playwright_stealth import stealth
 
 app = FastAPI()
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
-)
+# ─── HTTP fetch — impersonates real Chrome TLS fingerprint ───────────────────
+# This bypasses Cloudflare without needing any browser installed.
 
-# ─── Claude.ai specific selectors (as of 2025) ───────────────────────────────
-# Share pages render with these classes/testids
-CLAUDE_USER_SELECTORS = [
-    "div[data-testid='human-turn']",
-    ".human-turn",
-    "[class*='human-turn']",
-    "div[data-testid='templated-cell']",  # older format
-]
-
-CLAUDE_AI_SELECTORS = [
-    "div[data-testid='ai-turn']",
-    ".ai-turn",
-    "[class*='ai-turn']",
-    ".font-claude-message",              # suggested by community
-]
-
-# Combined wait selector — if any of these exist, page has rendered
-WAIT_SELECTOR = (
-    "div[data-testid='human-turn'], "
-    "div[data-testid='ai-turn'], "
-    ".font-claude-message, "
-    ".human-turn, "
-    ".ai-turn, "
-    "div[data-testid='templated-cell']"
-)
+def fetch_page(url: str) -> str:
+    resp = cffi_requests.get(
+        url,
+        impersonate="chrome124",   # spoof Chrome 124 TLS fingerprint
+        timeout=20,
+        headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Cache-Control": "no-cache",
+        },
+        follow_redirects=True,
+    )
+    resp.raise_for_status()
+    return resp.text
 
 
-class ScrapeRequest(BaseModel):
-    url: str
-    format: str = "txt"
-
-
-# ─── Strategy 1: __NEXT_DATA__ JSON blob ─────────────────────────────────────
+# ─── Strategy 1: __NEXT_DATA__ JSON (Next.js SSR) ────────────────────────────
+# Claude.ai SSR-embeds the full conversation as JSON in every share page.
+# This is the most reliable extraction path.
 
 def _dig(obj, *keys):
     for k in keys:
@@ -79,104 +62,130 @@ def _parse_message_list(raw: list) -> list[dict]:
     return result
 
 
-async def _try_next_data(page) -> list[dict]:
+def extract_from_next_data(html: str) -> list[dict]:
+    soup = BeautifulSoup(html, "lxml")
+    tag = soup.find("script", {"id": "__NEXT_DATA__"})
+    if not tag or not tag.string:
+        return []
     try:
-        raw = await page.evaluate(
-            "() => document.getElementById('__NEXT_DATA__')?.textContent"
-        )
-        if not raw:
-            return []
-        data = json.loads(raw)
-        candidates = [
-            _dig(data, "props", "pageProps", "shareData", "conversation", "chat_messages"),
-            _dig(data, "props", "pageProps", "conversation", "chat_messages"),
-            _dig(data, "props", "pageProps", "shareData", "chat_messages"),
-            _dig(data, "props", "pageProps", "messages"),
-        ]
-        for msgs in candidates:
-            if isinstance(msgs, list) and msgs:
-                return _parse_message_list(msgs)
-    except Exception:
-        pass
-    return []
+        data = json.loads(tag.string)
+    except json.JSONDecodeError:
+        return []
 
-
-# ─── Strategy 2: Claude.ai DOM — paired user + ai selectors ──────────────────
-
-async def _try_claude_dom(page) -> list[dict]:
-    """
-    Try each (user_sel, ai_sel) pair.  For each pair, grab all matching
-    elements, tag them with their role, sort by DOM position, return.
-    """
-    pairs = list(zip(CLAUDE_USER_SELECTORS, CLAUDE_AI_SELECTORS))
-    # Also try combined with index-based alternation (fallback within this strategy)
-    for user_sel, ai_sel in pairs:
-        try:
-            result = await page.evaluate(
-                f"""
-                () => {{
-                    const users = [...document.querySelectorAll('{user_sel}')];
-                    const ais   = [...document.querySelectorAll('{ai_sel}')];
-                    if (!users.length && !ais.length) return null;
-
-                    // Tag each with role + its DOM order
-                    const all = [
-                        ...users.map(el => ({{ role: 'user',      el }})),
-                        ...ais.map(el   => ({{ role: 'assistant', el }}))
-                    ];
-                    // Sort by DOM position
-                    all.sort((a, b) => {{
-                        const pos = a.el.compareDocumentPosition(b.el);
-                        return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
-                    }});
-                    return all
-                        .map(x => ({{ role: x.role, content: x.el.innerText.trim() }}))
-                        .filter(m => m.content.length > 0);
-                }}
-                """
-            )
-            if result and len(result) >= 2:
-                return result
-        except Exception:
-            continue
-    return []
-
-
-# ─── Strategy 3: Index-based alternation (any combined selector) ─────────────
-
-async def _try_index_alternation(page) -> list[dict]:
-    """
-    Query all message-like elements in DOM order, alternate user/assistant.
-    Works when user+ai elements can't be distinguished by selector alone.
-    """
-    combined_selectors = [
-        ".font-claude-message, div[data-testid='templated-cell']",
-        "[data-testid='human-turn'], [data-testid='ai-turn']",
-        ".human-turn, .ai-turn",
-        "[class*='human-turn'], [class*='ai-turn']",
+    candidates = [
+        _dig(data, "props", "pageProps", "shareData", "conversation", "chat_messages"),
+        _dig(data, "props", "pageProps", "conversation", "chat_messages"),
+        _dig(data, "props", "pageProps", "shareData", "chat_messages"),
+        _dig(data, "props", "pageProps", "messages"),
     ]
-    for sel in combined_selectors:
+    for msgs in candidates:
+        if isinstance(msgs, list) and msgs:
+            return _parse_message_list(msgs)
+    return []
+
+
+# ─── Strategy 2: inline JSON blob search ─────────────────────────────────────
+# Some platforms inject conversation JSON elsewhere in the page.
+
+def extract_from_json_blobs(html: str) -> list[dict]:
+    # Find large JSON objects that look like message arrays
+    pattern = re.compile(r'\[\s*\{[^{}]*"(?:role|sender)"[^{}]*\}', re.DOTALL)
+    for match in pattern.finditer(html):
         try:
-            result = await page.evaluate(
-                f"""
-                () => {{
-                    const els = [...document.querySelectorAll('{sel}')];
-                    if (els.length < 2) return null;
-                    return els.map((el, i) => ({{
-                        role: i % 2 === 0 ? 'user' : 'assistant',
-                        content: el.innerText.trim()
-                    }})).filter(m => m.content.length > 0);
-                }}
-                """
-            )
-            if result and len(result) >= 2:
-                return result
+            # Try to grab a full JSON array starting at this position
+            start = match.start()
+            bracket_depth = 0
+            end = start
+            for i, ch in enumerate(html[start:], start):
+                if ch == '[':
+                    bracket_depth += 1
+                elif ch == ']':
+                    bracket_depth -= 1
+                    if bracket_depth == 0:
+                        end = i + 1
+                        break
+            blob = json.loads(html[start:end])
+            if isinstance(blob, list) and blob:
+                result = _parse_message_list(blob)
+                if len(result) >= 2:
+                    return result
         except Exception:
             continue
     return []
 
 
-# ─── Strategy 4: Text heuristic ──────────────────────────────────────────────
+# ─── Strategy 3: DOM selectors via BeautifulSoup ─────────────────────────────
+
+SELECTOR_PAIRS = [
+    # Claude.ai
+    ("[data-testid='human-turn']",  "[data-testid='ai-turn']"),
+    (".human-turn",                  ".ai-turn"),
+    # ChatGPT
+    ("[data-message-author-role='user']", "[data-message-author-role='assistant']"),
+    # Generic
+    ("[class*='userMessage']",       "[class*='assistantMessage']"),
+    ("[class*='user-message']",      "[class*='model-response']"),
+]
+
+
+def extract_from_dom(html: str) -> list[dict]:
+    soup = BeautifulSoup(html, "lxml")
+    for user_sel, ai_sel in SELECTOR_PAIRS:
+        users = soup.select(user_sel)
+        ais   = soup.select(ai_sel)
+        if not users and not ais:
+            continue
+        # Merge and sort by document order
+        tagged = (
+            [(el, "user")      for el in users] +
+            [(el, "assistant") for el in ais]
+        )
+        # Sort by position in the document
+        all_els = list(soup.descendants)
+        def order(item):
+            try:
+                return all_els.index(item[0])
+            except ValueError:
+                return 9999
+        tagged.sort(key=order)
+        result = [
+            {"role": role, "content": el.get_text("\n", strip=True)}
+            for el, role in tagged
+            if el.get_text(strip=True)
+        ]
+        if len(result) >= 2:
+            return result
+    return []
+
+
+# ─── Strategy 4: index-based alternation ─────────────────────────────────────
+
+INDEX_SELECTORS = [
+    ".font-claude-message, [data-testid='templated-cell']",
+]
+
+
+def extract_index_alternation(html: str) -> list[dict]:
+    soup = BeautifulSoup(html, "lxml")
+    for sel in [
+        {"class": "font-claude-message"},
+    ]:
+        els = soup.find_all(attrs=sel)
+        if len(els) >= 2:
+            result = []
+            for i, el in enumerate(els):
+                text = el.get_text("\n", strip=True)
+                if text:
+                    result.append({
+                        "role": "user" if i % 2 == 0 else "assistant",
+                        "content": text,
+                    })
+            if len(result) >= 2:
+                return result
+    return []
+
+
+# ─── Strategy 5: text heuristic ──────────────────────────────────────────────
 
 ROLE_MAP = {
     "you": "user", "human": "user", "user": "user",
@@ -186,178 +195,7 @@ ROLE_MAP = {
 }
 
 
-async def _try_text_heuristic(page) -> list[dict]:
-    try:
-        body_text = await page.evaluate("() => document.body.innerText")
-        if not body_text:
-            return []
-        lines = body_text.splitlines()
-        messages, current_role, buf = [], None, []
-
-        def flush():
-            nonlocal buf
-            text = "\n".join(buf).strip()
-            if current_role and text:
-                messages.append({"role": current_role, "content": text})
-            buf = []
-
-        for line in lines:
-            stripped = line.strip()
-            lower = stripped.lower()
-            matched = None
-            for label, role in ROLE_MAP.items():
-                if lower.startswith(label + ":") or lower.startswith(label + " said:"):
-                    matched = (role, stripped[len(label):].lstrip(": ").strip())
-                    break
-            if matched:
-                flush()
-                current_role = matched[0]
-                if matched[1]:
-                    buf.append(matched[1])
-            elif current_role is not None:
-                buf.append(line)
-
-        flush()
-        return messages if len(messages) >= 2 else []
-    except Exception:
-        pass
-    return []
-
-
-# ─── Main scraper ─────────────────────────────────────────────────────────────
-
-async def scrape(url: str) -> list[dict]:
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--disable-extensions",
-                "--disable-infobars",
-                "--window-size=1280,900",
-            ],
-        )
-        ctx = await browser.new_context(
-            user_agent=USER_AGENT,
-            viewport={"width": 1280, "height": 900},
-            locale="en-US",
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-        )
-        page = await ctx.new_page()
-
-        # Apply stealth patches to bypass bot detection / Cloudflare
-        await stealth(page)
-
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-
-            # Wait for actual message content to appear (up to 15s)
-            try:
-                await page.wait_for_selector(WAIT_SELECTOR, timeout=15_000)
-            except PlaywrightTimeout:
-                pass  # May still have content via __NEXT_DATA__
-
-            # Extra breathing room for React hydration
-            await page.wait_for_timeout(2000)
-
-        except PlaywrightTimeout:
-            pass
-
-        # Run strategies in order of reliability
-        msgs = (
-            await _try_next_data(page)
-            or await _try_claude_dom(page)
-            or await _try_index_alternation(page)
-            or await _try_text_heuristic(page)
-        )
-
-        await browser.close()
-        return msgs or []
-
-
-# ─── Formatters ───────────────────────────────────────────────────────────────
-
-def format_txt(messages: list[dict]) -> str:
-    lines = []
-    for m in messages:
-        role = "USER" if m["role"] == "user" else "ASSISTANT"
-        lines.append(f"[{role}]")
-        lines.append(m["content"])
-        lines.append("")
-    return "\n".join(lines).strip()
-
-
-def format_md(messages: list[dict]) -> str:
-    lines = []
-    for i, m in enumerate(messages):
-        lines.append("### 🧑 User" if m["role"] == "user" else "### 🤖 Assistant")
-        lines.append("")
-        lines.append(m["content"])
-        lines.append("")
-        if i < len(messages) - 1:
-            lines.append("---")
-            lines.append("")
-    return "\n".join(lines).strip()
-
-
-# ─── API endpoint ─────────────────────────────────────────────────────────────
-
-@app.post("/export")
-async def export_chat(req: ScrapeRequest):
-    url = req.url.strip()
-    if not url.startswith("http"):
-        raise HTTPException(status_code=400, detail="Invalid URL — must start with https://")
-
-    messages = await scrape(url)
-
-    if not messages:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Could not extract conversation. The page may be behind a login, "
-                "protected by Cloudflare, or uses an unsupported layout. "
-                "Try the manual paste option."
-            )
-        )
-
-    if req.format == "json":
-        content = json.dumps(messages, indent=2, ensure_ascii=False)
-        media_type = "application/json"
-        filename = "chat_export.json"
-    elif req.format == "md":
-        content = format_md(messages)
-        media_type = "text/markdown"
-        filename = "chat_export.md"
-    else:
-        content = format_txt(messages)
-        media_type = "text/plain"
-        filename = "chat_export.txt"
-
-    return Response(
-        content=content.encode("utf-8"),
-        media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
-
-
-# ─── Serve frontend ───────────────────────────────────────────────────────────
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-
-# ─── Manual paste endpoint ────────────────────────────────────────────────────
-
-class ParseRequest(BaseModel):
-    raw_text: str
-    format: str = "txt"
-
-
-def parse_raw_text(text: str) -> list[dict]:
-    """Parse raw copied page text using role-label heuristic."""
+def extract_text_heuristic(text: str) -> list[dict]:
     lines = text.splitlines()
     messages, current_role, buf = [], None, []
 
@@ -386,34 +224,107 @@ def parse_raw_text(text: str) -> list[dict]:
             buf.append(line)
 
     flush()
-    return messages
+    return messages if len(messages) >= 2 else []
 
 
-@app.post("/parse")
-async def parse_chat(req: ParseRequest):
-    messages = parse_raw_text(req.raw_text)
+# ─── Main pipeline ────────────────────────────────────────────────────────────
 
-    if not messages:
-        raise HTTPException(
-            status_code=422,
-            detail="Could not detect conversation structure in the pasted text."
-        )
+def scrape(url: str) -> list[dict]:
+    html = fetch_page(url)  # raises on HTTP error
 
-    if req.format == "json":
-        content = json.dumps(messages, indent=2, ensure_ascii=False)
-        media_type = "application/json"
+    return (
+        extract_from_next_data(html)
+        or extract_from_json_blobs(html)
+        or extract_from_dom(html)
+        or extract_index_alternation(html)
+        or extract_text_heuristic(BeautifulSoup(html, "lxml").get_text("\n"))
+        or []
+    )
+
+
+# ─── Formatters ───────────────────────────────────────────────────────────────
+
+def format_txt(messages: list[dict]) -> str:
+    lines = []
+    for m in messages:
+        role = "USER" if m["role"] == "user" else "ASSISTANT"
+        lines.append(f"[{role}]")
+        lines.append(m["content"])
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def format_md(messages: list[dict]) -> str:
+    lines = []
+    for i, m in enumerate(messages):
+        lines.append("### 🧑 User" if m["role"] == "user" else "### 🤖 Assistant")
+        lines.append("")
+        lines.append(m["content"])
+        lines.append("")
+        if i < len(messages) - 1:
+            lines.append("---")
+            lines.append("")
+    return "\n".join(lines).strip()
+
+
+def build_response(messages: list[dict], fmt: str) -> Response:
+    if fmt == "json":
+        content  = json.dumps(messages, indent=2, ensure_ascii=False)
+        mime     = "application/json"
         filename = "chat_export.json"
-    elif req.format == "md":
-        content = format_md(messages)
-        media_type = "text/markdown"
+    elif fmt == "md":
+        content  = format_md(messages)
+        mime     = "text/markdown"
         filename = "chat_export.md"
     else:
-        content = format_txt(messages)
-        media_type = "text/plain"
+        content  = format_txt(messages)
+        mime     = "text/plain"
         filename = "chat_export.txt"
 
     return Response(
         content=content.encode("utf-8"),
-        media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        media_type=mime,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ─── Endpoints ────────────────────────────────────────────────────────────────
+
+class ExportRequest(BaseModel):
+    url: str
+    format: str = "txt"
+
+
+class ParseRequest(BaseModel):
+    raw_text: str
+    format: str = "txt"
+
+
+@app.post("/export")
+def export_chat(req: ExportRequest):
+    url = req.url.strip()
+    if not url.startswith("http"):
+        raise HTTPException(400, "URL must start with https://")
+    try:
+        messages = scrape(url)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch page: {e}")
+
+    if not messages:
+        raise HTTPException(422, (
+            "Page loaded but no conversation found. "
+            "Try the Manual Paste tab instead."
+        ))
+    return build_response(messages, req.format)
+
+
+@app.post("/parse")
+def parse_chat(req: ParseRequest):
+    messages = extract_text_heuristic(req.raw_text)
+    if not messages:
+        raise HTTPException(422, "Could not detect conversation structure in the pasted text.")
+    return build_response(messages, req.format)
+
+
+# ─── Serve frontend ───────────────────────────────────────────────────────────
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
