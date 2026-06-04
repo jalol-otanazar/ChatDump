@@ -12,15 +12,12 @@
     --surface: #111111;
     --border: #222222;
     --accent: #c8f135;
-    --accent-dim: #8aab1f;
     --text: #e8e8e8;
     --text-muted: #666;
     --error: #ff4d4d;
     --radius: 4px;
   }
-
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
   body {
     background: var(--bg);
     color: var(--text);
@@ -30,10 +27,7 @@
     flex-direction: column;
     align-items: center;
     padding: 0 20px 60px;
-    overflow-x: hidden;
   }
-
-  /* Grid background */
   body::before {
     content: '';
     position: fixed;
@@ -45,82 +39,82 @@
     pointer-events: none;
     z-index: 0;
   }
-
-  /* Glow blob */
-  body::after {
-    content: '';
-    position: fixed;
-    top: -200px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 600px;
-    height: 600px;
-    background: radial-gradient(circle, rgba(200,241,53,0.06) 0%, transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-  }
-
   header {
-    position: relative;
-    z-index: 1;
+    position: relative; z-index: 1;
     text-align: center;
-    padding: 72px 0 48px;
+    padding: 64px 0 40px;
   }
-
   .logo-mark {
     display: inline-block;
     font-family: 'Syne', sans-serif;
     font-weight: 800;
-    font-size: 11px;
+    font-size: 10px;
     letter-spacing: 0.35em;
     text-transform: uppercase;
     color: var(--accent);
     border: 1px solid var(--accent);
     padding: 4px 10px;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
-
   h1 {
     font-family: 'Syne', sans-serif;
     font-weight: 800;
-    font-size: clamp(2.4rem, 6vw, 4.5rem);
+    font-size: clamp(2rem, 6vw, 4rem);
     line-height: 1;
     letter-spacing: -0.02em;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
   }
-
-  h1 span {
-    color: var(--accent);
-  }
-
+  h1 span { color: var(--accent); }
   .subtitle {
     color: var(--text-muted);
-    font-size: 13px;
+    font-size: 12px;
     letter-spacing: 0.05em;
     max-width: 380px;
     margin: 0 auto;
-    line-height: 1.7;
+    line-height: 1.8;
+  }
+
+  /* Tabs */
+  .tabs {
+    position: relative; z-index: 1;
+    display: flex;
+    width: 100%;
+    max-width: 640px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0;
+  }
+  .tab {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 14px 0;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-bottom: -1px;
+  }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
   }
 
   .card {
-    position: relative;
-    z-index: 1;
+    position: relative; z-index: 1;
     width: 100%;
     max-width: 640px;
     background: var(--surface);
     border: 1px solid var(--border);
-    padding: 36px;
-    margin-bottom: 16px;
+    border-top: none;
+    padding: 32px;
+    margin-bottom: 12px;
   }
-
-  .card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, var(--accent), transparent);
-    opacity: 0.5;
-  }
+  .panel { display: none; }
+  .panel.active { display: block; }
 
   label {
     display: block;
@@ -128,17 +122,10 @@
     letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--text-muted);
-    margin-bottom: 10px;
+    margin-bottom: 9px;
   }
-
-  .input-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 24px;
-  }
-
-  input[type="text"] {
-    flex: 1;
+  input[type="text"], textarea {
+    width: 100%;
     background: var(--bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -147,23 +134,17 @@
     padding: 12px 14px;
     outline: none;
     transition: border-color 0.2s;
-    min-width: 0;
+    resize: vertical;
   }
-
-  input[type="text"]:focus {
-    border-color: var(--accent);
-  }
-
-  input[type="text"]::placeholder {
-    color: var(--text-muted);
-  }
+  input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
+  input[type="text"]::placeholder, textarea::placeholder { color: var(--text-muted); }
+  textarea { min-height: 140px; margin-bottom: 0; }
 
   .format-row {
     display: flex;
     gap: 8px;
-    margin-bottom: 28px;
+    margin: 20px 0;
   }
-
   .fmt-btn {
     flex: 1;
     background: var(--bg);
@@ -177,19 +158,13 @@
     transition: all 0.15s;
     text-transform: uppercase;
   }
-
-  .fmt-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
+  .fmt-btn:hover { border-color: var(--accent); color: var(--accent); }
   .fmt-btn.active {
     background: var(--accent);
     border-color: var(--accent);
     color: #000;
     font-weight: 700;
   }
-
   .export-btn {
     width: 100%;
     background: var(--accent);
@@ -203,121 +178,71 @@
     padding: 16px;
     cursor: pointer;
     transition: all 0.15s;
-    position: relative;
-    overflow: hidden;
   }
+  .export-btn:hover { background: #d9ff40; transform: translateY(-1px); }
+  .export-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-  .export-btn:hover {
-    background: #d9ff40;
-    transform: translateY(-1px);
+  .hint-box {
+    background: #0f1a00;
+    border: 1px solid #2a3d00;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    font-size: 11px;
+    line-height: 1.8;
+    color: #a0b860;
   }
+  .hint-box strong { color: var(--accent); }
 
-  .export-btn:active {
-    transform: translateY(0);
-  }
-
-  .export-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .export-btn .btn-text { display: block; }
-
-  /* Status */
   .status {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    max-width: 640px;
-    font-size: 12px;
-    min-height: 24px;
+    position: relative; z-index: 1;
+    width: 100%; max-width: 640px;
+    font-size: 12px; min-height: 22px;
     text-align: center;
     color: var(--text-muted);
     padding: 0 8px;
     transition: all 0.3s;
   }
-
   .status.error { color: var(--error); }
   .status.success { color: var(--accent); }
 
-  /* Loading animation */
   .loading-dots::after {
     content: '';
     animation: dots 1.2s steps(4, end) infinite;
   }
-
   @keyframes dots {
-    0%   { content: ''; }
-    25%  { content: '.'; }
-    50%  { content: '..'; }
-    75%  { content: '...'; }
+    0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'}
   }
 
-  /* Supported platforms */
-  .platforms {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    max-width: 640px;
-    margin-top: 32px;
-  }
-
-  .platforms-label {
-    font-size: 10px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin-bottom: 12px;
-    text-align: center;
-  }
-
-  .platform-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    justify-content: center;
-  }
-
-  .tag {
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    padding: 5px 12px;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    text-transform: uppercase;
-  }
-
-  /* Progress bar */
   .progress-bar {
-    position: fixed;
-    top: 0; left: 0;
-    height: 2px;
-    background: var(--accent);
-    width: 0%;
-    transition: width 0.3s ease;
-    z-index: 100;
+    position: fixed; top: 0; left: 0;
+    height: 2px; background: var(--accent);
+    width: 0%; transition: width 0.3s ease; z-index: 100;
   }
 
-  /* Success animation */
-  @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
+  .platforms {
+    position: relative; z-index: 1;
+    width: 100%; max-width: 640px;
+    margin-top: 28px;
   }
-
-  .success-msg {
-    animation: fadeInUp 0.3s ease;
+  .platforms-label {
+    font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--text-muted);
+    margin-bottom: 10px; text-align: center;
   }
-
+  .platform-tags {
+    display: flex; flex-wrap: wrap;
+    gap: 8px; justify-content: center;
+  }
+  .tag {
+    font-size: 10px; letter-spacing: 0.1em;
+    padding: 5px 12px; border: 1px solid var(--border);
+    color: var(--text-muted); text-transform: uppercase;
+  }
   footer {
-    position: relative;
-    z-index: 1;
-    margin-top: 60px;
-    color: var(--text-muted);
-    font-size: 10px;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    text-align: center;
+    position: relative; z-index: 1;
+    margin-top: 50px; color: var(--text-muted);
+    font-size: 10px; letter-spacing: 0.15em;
+    text-transform: uppercase; text-align: center;
   }
 </style>
 </head>
@@ -326,34 +251,59 @@
 <div class="progress-bar" id="progressBar"></div>
 
 <header>
-  <div class="logo-mark">ChatDump v1.0</div>
+  <div class="logo-mark">ChatDump v1.1</div>
   <h1>Export Any<br><span>AI Chat</span></h1>
-  <p class="subtitle">Paste a share link. Get a clean file. Share with any LLM — no browser required.</p>
+  <p class="subtitle">Paste a share link — or the raw text — and get a clean file to share with any LLM.</p>
 </header>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('auto', this)">🔗 Auto (URL)</button>
+  <button class="tab" onclick="switchTab('manual', this)">📋 Manual (Paste Text)</button>
+</div>
 
 <div class="card">
 
-  <label for="urlInput">Share Link</label>
-  <div class="input-row">
-    <input
-      type="text"
-      id="urlInput"
+  <!-- Tab 1: Auto URL -->
+  <div class="panel active" id="panel-auto">
+    <label for="urlInput">Share Link</label>
+    <input type="text" id="urlInput"
       placeholder="https://claude.ai/share/... or any AI chat link"
-      autocomplete="off"
-      spellcheck="false"
+      autocomplete="off" spellcheck="false"
+      style="margin-bottom: 20px;"
     >
+
+    <div class="format-row">
+      <button class="fmt-btn active" data-fmt="txt" onclick="setFormat(this)">.TXT</button>
+      <button class="fmt-btn" data-fmt="md" onclick="setFormat(this)">.MD</button>
+      <button class="fmt-btn" data-fmt="json" onclick="setFormat(this)">.JSON</button>
+    </div>
+
+    <button class="export-btn" id="exportBtnAuto" onclick="doExport('auto')">
+      <span id="btnTextAuto">↓ Export Chat</span>
+    </button>
   </div>
 
-  <label>Output Format</label>
-  <div class="format-row">
-    <button class="fmt-btn active" data-fmt="txt" onclick="setFormat(this)">.TXT</button>
-    <button class="fmt-btn" data-fmt="md" onclick="setFormat(this)">.MD</button>
-    <button class="fmt-btn" data-fmt="json" onclick="setFormat(this)">.JSON</button>
-  </div>
+  <!-- Tab 2: Manual paste -->
+  <div class="panel" id="panel-manual">
+    <div class="hint-box">
+      <strong>If the URL approach fails</strong> (Cloudflare blocks it):<br>
+      1. Open the share link in your browser<br>
+      2. Press <strong>Ctrl+A</strong> then <strong>Ctrl+C</strong><br>
+      3. Paste the full page text below
+    </div>
+    <label for="pasteInput">Paste Page Text</label>
+    <textarea id="pasteInput" placeholder="Paste the full copied text from the share page here..."></textarea>
 
-  <button class="export-btn" id="exportBtn" onclick="doExport()">
-    <span class="btn-text" id="btnText">↓ Export Chat</span>
-  </button>
+    <div class="format-row">
+      <button class="fmt-btn active" data-fmt="txt" onclick="setFormat(this)">.TXT</button>
+      <button class="fmt-btn" data-fmt="md" onclick="setFormat(this)">.MD</button>
+      <button class="fmt-btn" data-fmt="json" onclick="setFormat(this)">.JSON</button>
+    </div>
+
+    <button class="export-btn" id="exportBtnManual" onclick="doExport('manual')">
+      <span id="btnTextManual">↓ Export Chat</span>
+    </button>
+  </div>
 
 </div>
 
@@ -371,12 +321,20 @@
   </div>
 </div>
 
-<footer>
-  Opens link in a real browser headlessly · No data stored · Open source
-</footer>
+<footer>Headless browser · No data stored · Open source</footer>
 
 <script>
   let selectedFormat = 'txt';
+  let currentTab = 'auto';
+
+  function switchTab(tab, btn) {
+    currentTab = tab;
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + tab).classList.add('active');
+    setStatus('');
+  }
 
   function setFormat(btn) {
     document.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('active'));
@@ -394,33 +352,39 @@
     document.getElementById('progressBar').style.width = pct + '%';
   }
 
-  async function doExport() {
-    const url = document.getElementById('urlInput').value.trim();
-    if (!url) {
-      setStatus('⚠ Paste a share link first.', 'error');
-      return;
-    }
-    if (!url.startsWith('http')) {
-      setStatus('⚠ URL must start with https://', 'error');
-      return;
-    }
+  async function doExport(mode) {
+    const btnId = mode === 'auto' ? 'exportBtnAuto' : 'exportBtnManual';
+    const txtId = mode === 'auto' ? 'btnTextAuto' : 'btnTextManual';
+    const btn = document.getElementById(btnId);
+    const btnText = document.getElementById(txtId);
 
-    const btn = document.getElementById('exportBtn');
-    const btnText = document.getElementById('btnText');
+    let body;
+
+    if (mode === 'auto') {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) { setStatus('⚠ Paste a share link first.', 'error'); return; }
+      if (!url.startsWith('http')) { setStatus('⚠ URL must start with https://', 'error'); return; }
+      body = JSON.stringify({ url, format: selectedFormat });
+      setStatus('Opening link in headless browser…');
+    } else {
+      const text = document.getElementById('pasteInput').value.trim();
+      if (!text) { setStatus('⚠ Paste some chat text first.', 'error'); return; }
+      body = JSON.stringify({ url: 'paste://', format: selectedFormat, raw_text: text });
+      setStatus('Parsing pasted text…');
+    }
 
     btn.disabled = true;
-    btnText.textContent = 'Fetching';
+    btnText.textContent = 'Processing';
     btnText.classList.add('loading-dots');
-    setStatus('Opening link in headless browser…', '');
     setProgress(20);
 
     try {
-      const resp = await fetch('/export', {
+      const endpoint = mode === 'manual' ? '/parse' : '/export';
+      const resp = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, format: selectedFormat })
+        body
       });
-
       setProgress(80);
 
       if (!resp.ok) {
@@ -428,11 +392,8 @@
         throw new Error(err.detail || `HTTP ${resp.status}`);
       }
 
-      // Download the file
       const blob = await resp.blob();
-      const ext = selectedFormat;
-      const filename = `chat_export.${ext}`;
-
+      const filename = `chat_export.${selectedFormat}`;
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = filename;
@@ -454,9 +415,8 @@
     }
   }
 
-  // Allow pressing Enter in URL input
   document.getElementById('urlInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') doExport();
+    if (e.key === 'Enter') doExport('auto');
   });
 </script>
 
